@@ -1,0 +1,26 @@
+services:
+  mirror:
+    image: nginx:alpine
+    container_name: rccs-mirror
+    volumes:
+      - ./mirror:/usr/share/nginx/html:ro,Z
+      - ./nginx/sites:/etc/nginx/conf.d:ro,Z
+    networks:
+      restricted_mirror:
+        aliases:
+          - twiki.cern.mirror
+          - cms-talk.web.cern.mirror
+          - cmscrab.docs.cern.mirror
+          - deepwiki.mirror
+
+  squid:
+    image: ubuntu/squid:latest
+    container_name: rccs-squid
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+    networks:
+      - restricted_mirror
+
+networks:
+  restricted_mirror:
+    external: true
