@@ -1,0 +1,57 @@
+crawl:
+  obey_robots: true
+  crawl_delay: 1
+  max_depth: 1
+  concurrent_requests: 1
+  user_agent: "rccs-crawler (internal benchmarking)"
+
+sites:
+  - name: twiki
+    enabled: true
+    start_urls:
+      - https://twiki.cern.ch/twiki/bin/view/CMSPublic/CRAB3ConfigurationFile
+    allowed_domains:
+      - twiki.cern.ch
+    allowed_path_prefixes:
+      - /twiki/bin/view/CMSPublic/
+    crawl:
+      obey_robots: false
+      crawl_delay: 120
+      max_depth: 1
+
+  - name: cms-talk
+    enabled: false
+    start_urls:
+      - https://cms-talk.web.cern.ch/c/offcomp/comptools/87.rss
+    allowed_domains:
+      - cms-talk.web.cern.ch
+    allowed_path_prefixes:
+      - /c/offcomp/comptools/
+
+  - name: cmscrab
+    enabled: false
+    start_urls:
+      - https://cmscrab.docs.cern.ch/crab-infrastructure/crab-secrets/introduction.html
+    allowed_domains:
+      - cms-talk.web.cern.ch
+    allowed_path_prefixes:
+      - /
+
+  - name: deepwiki
+    enabled: false
+    start_urls:
+      - https://deepwiki.com/dmwm/CRABServer
+      - https://deepwiki.com/dmwm/CRABClient
+    allowed_domains:
+      - deepwiki.com
+    allowed_path_prefixes:
+      - /dmwm/CRABServer
+      - /dmwm/CRABClient
+
+mirror:
+  root: ../mirror
+
+proxy:
+  enabled: false
+  http: http://squid:3128
+  https: http://squid:3128
