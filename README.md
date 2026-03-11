@@ -11,3 +11,7 @@ scrapy crawl twiki
 # Serving mirror separately
 docker compose up -d
 ```
+
+### Contributors
+  - Krittin Phornsiricharoenphant (krittin.phornsiricharoenphant@cern.ch)
+  - ...
