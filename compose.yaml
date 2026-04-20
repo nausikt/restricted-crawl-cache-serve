@@ -8,15 +8,14 @@ services:
       - ./mirror:/usr/share/nginx/html:ro
       - ./nginx/sites:/etc/nginx/conf.d:ro
     ports:
-      - "{{ mirror_port }}:80"
+      - "8080:80"
     networks:
-      {{ network_name }}:
+      restricted_mirror:
         aliases:
-{%- for alias in aliases %}
-          - {{ alias }}
-{%- endfor %}
+          - cms-talk.web.cern.test
+          - twiki.cern.test
 
 networks:
-  {{ network_name }}:
-    name: {{ network_name }}
+  restricted_mirror:
+    name: restricted_mirror
     internal: true

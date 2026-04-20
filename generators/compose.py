@@ -21,13 +21,16 @@ def generate_compose(
     domain_map: Dict[str, str],
     output_path: str | Path = "compose.yaml",
     mirror_port: int = 8080,
+    network_name: str = "restricted_mirror",
 ) -> Path:
     """Render compose.yaml from domain mapping.
 
     Args:
-        domain_map: {original_domain: test_domain}
-        output_path: where to write the composed YAML
-        mirror_port: host port to expose (default 8080)
+        domain_map:   {original_domain: test_domain}
+        output_path:  where to write the composed YAML
+        mirror_port:  host port to expose (default 80)
+        network_name: docker compose network name (default "restricted_mirror").
+            The network is always rendered with ``internal: true``.
 
     Returns:
         Path to the generated file.
@@ -43,6 +46,7 @@ def generate_compose(
     rendered = template.render(
         aliases=aliases,
         mirror_port=mirror_port,
+        network_name=network_name,
     )
 
     out = Path(output_path)
