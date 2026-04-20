@@ -1,0 +1,3 @@
+[submodule "archi"]
+	path = archi
+	url = https://github.com/nausikt/archi.git

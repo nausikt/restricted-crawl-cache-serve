@@ -1,0 +1,16 @@
+server {
+  listen 80;
+  server_name {{ server_name }};
+
+  root /usr/share/nginx/html/{{ site_key }};
+  index index.html;
+
+  location / {
+    try_files $uri $uri/ $uri/index.html =404;
+  }
+
+  location ~* \.pdf$ {
+    types { application/pdf pdf; }
+    default_type application/pdf;
+  }
+}

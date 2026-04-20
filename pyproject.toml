@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rccs"
+version = "0.1.0"
+description = "Restricted Crawl, Cache, and Serve — mirror auth-gated websites for offline RAG benchmarking"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "scrapy>=2.11",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+archi = [
+    "archi @ file:./archi",
+]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[project.scripts]
+rccs = "crawler.rccs.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["crawler*", "generators*"]
+
+[tool.ruff]
+line-length = 120
