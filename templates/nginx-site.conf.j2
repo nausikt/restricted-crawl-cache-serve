@@ -5,12 +5,153 @@ server {
   root /usr/share/nginx/html/{{ site_key }};
   index index.html;
 
-  location / {
-    try_files $uri $uri/ $uri/index.html =404;
+  # JSON API responses cached with a query-string suffix
+  # (e.g. /c/.../87.json?page=3 -> 87.json__q__page-3).
+  location ~* \.json$ {
+    default_type application/json;
+    try_files $uri$rccs_qsuffix $uri =404;
   }
 
+  # RSS / Atom / XML feeds (some have query strings too).
+  location ~* \.rss$ {
+    default_type application/rss+xml;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.atom$ {
+    default_type application/atom+xml;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.xml$ {
+    default_type application/xml;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+
+  # Document downloads — set correct Content-Type because filenames
+  # with a __q__... suffix no longer match nginx's mime.types lookup.
   location ~* \.pdf$ {
-    types { application/pdf pdf; }
     default_type application/pdf;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.docx$ {
+    default_type application/vnd.openxmlformats-officedocument.wordprocessingml.document;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.doc$ {
+    default_type application/msword;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.pptx$ {
+    default_type application/vnd.openxmlformats-officedocument.presentationml.presentation;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.ppt$ {
+    default_type application/vnd.ms-powerpoint;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.xlsx$ {
+    default_type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.xls$ {
+    default_type application/vnd.ms-excel;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.odt$ {
+    default_type application/vnd.oasis.opendocument.text;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.odp$ {
+    default_type application/vnd.oasis.opendocument.presentation;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.ods$ {
+    default_type application/vnd.oasis.opendocument.spreadsheet;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.rtf$ {
+    default_type application/rtf;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.epub$ {
+    default_type application/epub+zip;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.csv$ {
+    default_type text/csv;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.tsv$ {
+    default_type text/tab-separated-values;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.(md|markdown)$ {
+    default_type text/markdown;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.txt$ {
+    default_type text/plain;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+
+  # Images — explicit default_type per format so cache-busting query
+  # strings (e.g. ?v=123) still produce correctly-typed responses.
+  location ~* \.png$ {
+    default_type image/png;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.(jpe?g|jpe|jfif)$ {
+    default_type image/jpeg;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.gif$ {
+    default_type image/gif;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.webp$ {
+    default_type image/webp;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.(svg|svgz)$ {
+    default_type image/svg+xml;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.bmp$ {
+    default_type image/bmp;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.ico$ {
+    default_type image/x-icon;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.tiff?$ {
+    default_type image/tiff;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.avif$ {
+    default_type image/avif;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.heic$ {
+    default_type image/heic;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.heif$ {
+    default_type image/heif;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+  location ~* \.apng$ {
+    default_type image/apng;
+    try_files $uri$rccs_qsuffix $uri =404;
+  }
+
+  # HTML and everything else.  Query-string variants fall back to the
+  # plain cached file, then to directory index.html.
+  location / {
+    try_files $uri$rccs_qsuffix
+              $uri/index.html$rccs_qsuffix
+              $uri
+              $uri/
+              $uri/index.html
+              =404;
   }
 }

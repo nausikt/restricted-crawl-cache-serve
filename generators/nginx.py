@@ -46,15 +46,25 @@ def generate_nginx_configs(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
         keep_trailing_newline=True,
     )
-    template = env.get_template("nginx-site.conf.j2")
+    site_template = env.get_template("nginx-site.conf.j2")
+    shared_template = env.get_template("nginx-shared.conf.j2")
 
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     generated: list[Path] = []
+
+    # Shared map (query-string -> filename suffix).  Filename is prefixed
+    # with "_" so nginx alphabetical include loads it before server blocks
+    # that reference $rccs_qsuffix.
+    shared_path = out_dir / "_rccs-shared.conf"
+    shared_path.write_text(shared_template.render(), encoding="utf-8")
+    logger.info("Generated nginx shared config: %s", shared_path)
+    generated.append(shared_path)
+
     for original_domain, test_domain in sorted(domain_map.items()):
         site_key = _site_key_from_domain(original_domain)
-        rendered = template.render(
+        rendered = site_template.render(
             server_name=test_domain,
             site_key=site_key,
         )
