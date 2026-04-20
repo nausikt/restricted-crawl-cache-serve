@@ -20,17 +20,28 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 def generate_compose(
     domain_map: Dict[str, str],
     output_path: str | Path = "compose.yaml",
+    mirror_root: str | Path = "./mirror",
+    nginx_sites_dir: str | Path = "./nginx/sites",
+    generated_output_dir: str | Path = ".",
     mirror_port: int = 8080,
     network_name: str = "restricted_mirror",
 ) -> Path:
     """Render compose.yaml from domain mapping.
 
     Args:
-        domain_map:   {original_domain: test_domain}
-        output_path:  where to write the composed YAML
-        mirror_port:  host port to expose (default 80)
-        network_name: docker compose network name (default "restricted_mirror").
-            The network is always rendered with ``internal: true``.
+        domain_map:            {original_domain: test_domain}
+        output_path:           where to write the composed YAML
+        mirror_root:           host path bound into nginx as
+                               ``/usr/share/nginx/html`` (baked in as an
+                               absolute path for portability).
+        nginx_sites_dir:       host path bound into nginx as
+                               ``/etc/nginx/conf.d`` (absolute).
+        generated_output_dir:  rendered in a header comment so the file
+                               documents its origin / ``$GENERATED_OUTPUT_DIR``.
+        mirror_port:           host port to expose (default 8080).
+        network_name:          docker compose network name
+                               (default "restricted_mirror"). The network is
+                               always rendered with ``internal: true``.
 
     Returns:
         Path to the generated file.
@@ -42,11 +53,17 @@ def generate_compose(
     template = env.get_template("compose.yaml.j2")
 
     aliases = sorted(domain_map.values())
+    mirror_root_abs = Path(mirror_root).expanduser().resolve()
+    nginx_sites_abs = Path(nginx_sites_dir).expanduser().resolve()
+    generated_abs = Path(generated_output_dir).expanduser().resolve()
 
     rendered = template.render(
         aliases=aliases,
         mirror_port=mirror_port,
         network_name=network_name,
+        mirror_root=str(mirror_root_abs),
+        nginx_sites_dir=str(nginx_sites_abs),
+        generated_output_dir=str(generated_abs),
     )
 
     out = Path(output_path)

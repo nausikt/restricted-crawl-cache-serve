@@ -28,8 +28,11 @@ CERN SSO Discourse (`cms-talk.web.cern.ch`), and paywalled publications.
      saved as `87.json__q__page-3`, so different query values map to
      different cached files.
 3. **Serve** — `rccs generate` emits a `compose.yaml` + per-site nginx
-   configs. Nginx is on an **internal** Docker/Podman network named
-   `restricted_mirror` and answers on `.test` aliases.
+   configs. The compose file has **absolute volume paths baked in** from
+   `$MIRROR_ROOT` and `$GENERATED_OUTPUT_DIR`, so `(docker|podman) compose
+   -f <path>/compose.yaml up` works from any directory. Nginx is on an
+   **internal** Docker/Podman network named `restricted_mirror` and
+   answers on `.test` aliases.
 
 ---
 
@@ -153,10 +156,22 @@ rccs run -c examples/basic-crab/config.yaml \
 
 ### 4. Start nginx
 
+Volume paths are absolute inside `compose.yaml`, so you don't have to
+`cd` first:
+
 ```bash
-cd "$GENERATED_OUTPUT_DIR"          # /shared/rccs
-podman compose up -d                 # or: docker compose up -d
-podman compose ps
+podman compose -f "$GENERATED_OUTPUT_DIR/compose.yaml" up -d
+podman compose -f "$GENERATED_OUTPUT_DIR/compose.yaml" ps
+# or: docker compose -f "$GENERATED_OUTPUT_DIR/compose.yaml" up -d
+```
+
+Inspect the baked-in binds:
+
+```bash
+grep -A1 volumes "$GENERATED_OUTPUT_DIR/compose.yaml"
+#   volumes:
+#     - /shared/rccs/mirror:/usr/share/nginx/html:ro
+#     - /shared/rccs/nginx/sites:/etc/nginx/conf.d:ro
 ```
 
 ### 5. Test from another container on the mirror network

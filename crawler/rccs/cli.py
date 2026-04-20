@@ -130,21 +130,29 @@ def cmd_generate(cfg: RCCSConfig) -> None:
     """
     out_root = Path(cfg.generated_output_dir).expanduser().resolve()
     out_root.mkdir(parents=True, exist_ok=True)
+    mirror_root_abs = Path(cfg.mirror_root).expanduser().resolve()
+    nginx_sites_dir = out_root / "nginx" / "sites"
 
     compose_path = generate_compose(
         domain_map=cfg.domain_map,
         output_path=out_root / "compose.yaml",
+        mirror_root=mirror_root_abs,
+        nginx_sites_dir=nginx_sites_dir,
+        generated_output_dir=out_root,
     )
     print(f"Generated: {compose_path}")
 
     nginx_configs = generate_nginx_configs(
         domain_map=cfg.domain_map,
-        output_dir=out_root / "nginx" / "sites",
+        output_dir=nginx_sites_dir,
     )
     for p in nginx_configs:
         print(f"Generated: {p}")
 
-    print(f"\nTo serve: (cd {out_root} && docker compose up -d)")
+    print(f"\nVolumes baked in:")
+    print(f"  mirror  -> {mirror_root_abs}")
+    print(f"  nginx   -> {nginx_sites_dir}")
+    print(f"\nTo serve (from anywhere): docker compose -f {compose_path} up -d")
 
 
 # ---------------------------------------------------------------------------
