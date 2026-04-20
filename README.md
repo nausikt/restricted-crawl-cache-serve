@@ -107,7 +107,7 @@ live under `/shared/rccs/`.
 ### 1. Export secrets + shared paths
 
 ```bash
-export SSO_USERNAME=aqua
+export SSO_USERNAME=donut
 export SSO_PASSWORD='••••••••'
 export MIRROR_ROOT=/shared/rccs/mirror
 export GENERATED_OUTPUT_DIR=/shared/rccs
@@ -310,21 +310,6 @@ unmapped queries fall back to the no-query file.
   routed based on URL extension.
 
 Unknown types are logged at DEBUG and skipped — the crawl continues.
-
----
-
-## Reminders (my own)
-
-- `SSO_USERNAME` / `SSO_PASSWORD` live only in the shell / a secret
-  manager. Never commit them.
-- Mirror lives at `$MIRROR_ROOT` (e.g. `/shared/rccs/mirror`). Generated
-  files land in `$GENERATED_OUTPUT_DIR` (e.g. `/shared/rccs`).
-- Compose network is **internal** and pinned to `restricted_mirror` (no
-  project prefix), so `--network restricted_mirror` always works.
-- After deleting query shapes or domains, regenerate:
-  `rccs generate -c <cfg>`.
-- `rccs` and `podman compose` must run under the **same** engine. If you
-  use Docker for compose, use Docker for curl helpers too.
 
 ---
 
