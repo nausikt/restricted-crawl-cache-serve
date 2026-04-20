@@ -66,6 +66,11 @@ produces its own cached file.  Encoding:
     ?page=3                   -> __q__page-3
     ?page=3&order=asc         -> __q__page-3__order-asc
 
+Display / tracking parameters (``redirectedfrom``, ``utm_*``, ``fbclid``,
+``skin``, cache-busters such as ``t`` / ``_``) are **stripped** before
+the suffix is computed so they coalesce onto a single canonical file.
+See :data:`_VIEW_ONLY_QUERY_PARAMS` for the full list.
+
 The companion nginx config uses a ``map $args $rccs_qsuffix`` block +
 ``try_files $uri$rccs_qsuffix $uri`` to serve these as if they were
 live backend responses.
@@ -212,11 +217,44 @@ _EXT_TO_MIME: dict[str, str] = {
 _QS_SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
 
+# Query parameters that only affect presentation / tracking, not the
+# cached resource itself.  Stripped from the cache key so different
+# display hints or tracking decorations coalesce into a single canonical
+# file on disk.
+#
+# Notably:
+#   - "redirectedfrom" is appended by TWiki/MediaWiki after a server-side
+#     30x redirect and is not visible to our spider's outgoing request.
+#     Filtering it here is the only place we can guarantee canonicalization.
+#   - "utm_*", "fbclid", "gclid" are link-decoration trackers.
+#   - "skin", "cover", "nocache", "t", "_" are display / cache-buster hints.
+_VIEW_ONLY_QUERY_PARAMS: frozenset[str] = frozenset({
+    "redirectedfrom",
+    "skin",
+    "cover",
+    "nocache",
+    "t",
+    "_",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "fbclid",
+    "gclid",
+})
+
+
 def _encode_query(qs: str) -> str:
     """Encode a URL query string into a filesystem-safe filename suffix.
 
-    Returns an empty string for an empty query.  Otherwise returns a string
-    of the form ``__q__<k>-<v>[__<k>-<v>...]`` where every character outside
+    View-only / tracking parameters listed in
+    :data:`_VIEW_ONLY_QUERY_PARAMS` are stripped first — a URL like
+    ``/topic?redirectedfrom=X`` therefore produces an empty suffix and
+    is cached as the canonical ``index.html``.
+
+    For the remaining parameters the function returns a string of the
+    form ``__q__<k>-<v>[__<k>-<v>...]`` where every character outside
     ``[A-Za-z0-9._-]`` is replaced with ``_``.
 
     The ``__q__`` prefix and ``-`` key/value separator are chosen so that
@@ -227,10 +265,16 @@ def _encode_query(qs: str) -> str:
         return ""
     parts: list[str] = []
     for kv in qs.split("&"):
+        if not kv:
+            continue
         k, _, v = kv.partition("=")
+        if k in _VIEW_ONLY_QUERY_PARAMS:
+            continue
         k = _QS_SAFE.sub("_", k)
         v = _QS_SAFE.sub("_", v)
         parts.append(f"{k}-{v}" if v else k)
+    if not parts:
+        return ""
     return "__q__" + "__".join(parts)
 
 
