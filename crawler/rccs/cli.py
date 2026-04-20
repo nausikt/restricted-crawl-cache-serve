@@ -7,6 +7,8 @@ Usage:
     rccs crawl    -c <archi-config.yaml>         # run Scrapy with caching middleware
     rccs generate -c <archi-config.yaml>         # emit compose.yaml + nginx configs
     rccs run      -c <archi-config.yaml>         # all three steps in sequence
+    rccs net up                                  # create the private `restricted_mirror` network
+    rccs net down                                # tear it down
 
 Standalone scrapy usage (with archi settings from submodule):
     cd crawler && scrapy crawl twiki
@@ -16,6 +18,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import shutil
+import subprocess
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -26,6 +30,62 @@ from generators.compose import generate_compose
 from generators.nginx import generate_nginx_configs
 
 logger = logging.getLogger("rccs")
+
+DEFAULT_NETWORK_NAME = "restricted_mirror"
+
+
+# ---------------------------------------------------------------------------
+# net: manage the private container network
+# ---------------------------------------------------------------------------
+
+def _container_engine() -> str:
+    """Return "podman" or "docker", preferring whichever is on PATH.
+
+    Override with ``RCCS_CONTAINER_ENGINE=docker|podman``.
+    """
+    override = os.environ.get("RCCS_CONTAINER_ENGINE", "").strip()
+    if override:
+        return override
+    for candidate in ("podman", "docker"):
+        if shutil.which(candidate):
+            return candidate
+    raise RuntimeError(
+        "Neither `podman` nor `docker` found on PATH. "
+        "Install one or set RCCS_CONTAINER_ENGINE."
+    )
+
+
+def cmd_net_up(network_name: str = DEFAULT_NETWORK_NAME) -> None:
+    """Create the private (internal, no-egress) container network.
+
+    Idempotent: exits cleanly if the network already exists.
+    """
+    engine = _container_engine()
+    inspect = subprocess.run(
+        [engine, "network", "inspect", network_name],
+        capture_output=True,
+        text=True,
+    )
+    if inspect.returncode == 0:
+        print(f"Network {network_name!r} already exists ({engine}).")
+        return
+
+    cmd = [engine, "network", "create", "--internal", network_name]
+    print(f"$ {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+    print(f"Created private network {network_name!r}.")
+
+
+def cmd_net_down(network_name: str = DEFAULT_NETWORK_NAME) -> None:
+    """Remove the private container network.
+
+    Fails if containers are still attached — stop them first with
+    ``(podman|docker) compose down``.
+    """
+    engine = _container_engine()
+    cmd = [engine, "network", "rm", network_name]
+    print(f"$ {' '.join(cmd)}")
+    subprocess.run(cmd, check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -149,10 +209,14 @@ def cmd_generate(cfg: RCCSConfig) -> None:
     for p in nginx_configs:
         print(f"Generated: {p}")
 
-    print(f"\nVolumes baked in:")
+    print("\nVolumes baked in:")
     print(f"  mirror  -> {mirror_root_abs}")
     print(f"  nginx   -> {nginx_sites_dir}")
-    print(f"\nTo serve (from anywhere): docker compose -f {compose_path} up -d")
+    print("\nNext steps:")
+    print("  1. rccs net up                       # one-time: create the private network")
+    print(f"  2. podman compose -f {compose_path} up -d")
+    print(f"  3. podman run -it --rm --no-hosts --network {DEFAULT_NETWORK_NAME} \\")
+    print("         curlimages/curl curl http://<alias>/...")
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +311,14 @@ def build_parsers() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
     sub.add_parser("generate", help="Generate compose.yaml + nginx configs")
     sub.add_parser("run", help="Parse + crawl + generate (full pipeline)")
 
+    net_parser = sub.add_parser(
+        "net",
+        help=f"Manage the private {DEFAULT_NETWORK_NAME!r} container network",
+    )
+    net_sub = net_parser.add_subparsers(dest="net_action", required=True)
+    net_sub.add_parser("up", help="Create the private (internal) network")
+    net_sub.add_parser("down", help="Remove the private network")
+
     return full_parser, global_parser
 
 
@@ -264,13 +336,21 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(1)
 
     cmd_args = full_parser.parse_args(rest)
-    if not gargs.config:
-        full_parser.error("the following arguments are required: -c/--config")
 
     logging.basicConfig(
         level=logging.DEBUG if gargs.verbose else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+
+    if cmd_args.command == "net":
+        if cmd_args.net_action == "up":
+            cmd_net_up()
+        elif cmd_args.net_action == "down":
+            cmd_net_down()
+        return
+
+    if not gargs.config:
+        full_parser.error("the following arguments are required: -c/--config")
 
     cfg = parse_archi_config(
         config_path=gargs.config,

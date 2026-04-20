@@ -30,9 +30,11 @@ CERN SSO Discourse (`cms-talk.web.cern.ch`), and paywalled publications.
 3. **Serve** — `rccs generate` emits a `compose.yaml` + per-site nginx
    configs. The compose file has **absolute volume paths baked in** from
    `$MIRROR_ROOT` and `$GENERATED_OUTPUT_DIR`, so `(docker|podman) compose
-   -f <path>/compose.yaml up` works from any directory. Nginx is on an
-   **internal** Docker/Podman network named `restricted_mirror` and
-   answers on `.test` aliases.
+   -f <path>/compose.yaml up` works from any directory. Nginx is served
+   **only** on a private, no-egress container network named
+   `restricted_mirror` — **no host ports are published**. Consumers
+   (archi's `data_manager`, ad-hoc `curl`) attach to the same network to
+   reach the `.test` aliases.
 
 ---
 
@@ -68,12 +70,17 @@ rccs -c examples/basic-crab/config.yaml parse       # both forms
 rccs parse -c examples/basic-crab/config.yaml       # are equivalent
 ```
 
-| Subcommand | Action                                                |
-|------------|-------------------------------------------------------|
-| `parse`    | Validate Archi config + print the crawl plan          |
-| `crawl`    | Run Scrapy with caching middleware                    |
-| `generate` | Emit `compose.yaml` + `nginx/sites/*.conf`            |
-| `run`      | `parse` → `crawl` → `generate` in one shot            |
+| Subcommand   | Action                                                |
+|--------------|-------------------------------------------------------|
+| `parse`      | Validate Archi config + print the crawl plan          |
+| `crawl`      | Run Scrapy with caching middleware                    |
+| `generate`   | Emit `compose.yaml` + `nginx/sites/*.conf`            |
+| `run`        | `parse` → `crawl` → `generate` in one shot            |
+| `net up`     | Create the private `restricted_mirror` network        |
+| `net down`   | Remove the private `restricted_mirror` network        |
+
+The container engine used by `rccs net …` is auto-detected (`podman`
+first, then `docker`); override with `RCCS_CONTAINER_ENGINE`.
 
 Global flags (each has an environment-variable fallback):
 
@@ -154,7 +161,18 @@ rccs run -c examples/basic-crab/config.yaml \
     --generated-output-dir /shared/rccs
 ```
 
-### 4. Start nginx
+### 4. Create the private network (one-time)
+
+`restricted_mirror` is declared `external: true` in the generated
+compose, and created with `--internal` so it has **no egress**. Create
+it once:
+
+```bash
+rccs net up
+# equivalent to:  podman network create --internal restricted_mirror
+```
+
+### 5. Start nginx
 
 Volume paths are absolute inside `compose.yaml`, so you don't have to
 `cd` first:
@@ -174,10 +192,11 @@ grep -A1 volumes "$GENERATED_OUTPUT_DIR/compose.yaml"
 #     - /shared/rccs/nginx/sites:/etc/nginx/conf.d:ro
 ```
 
-### 5. Test from another container on the mirror network
+### 6. Test from another container on the mirror network
 
-The network is **internal** (no egress), named literally `restricted_mirror`
-— no project prefix — thanks to the pinned `name:` in the compose file.
+The network is **internal** (no egress) and **has no host port**. The
+only way in is to join the network from another container. `rccs net up`
+created it as `restricted_mirror` (no project prefix).
 
 ```bash
 # one-liner curl helper that joins the same network
@@ -190,10 +209,43 @@ rcurl http://twiki.cern.test/twiki/bin/view/CMSPublic/SWGuide/
 rcurl http://cms-talk.web.cern.test/c/offcomp/comptools/87.json?page=3
 ```
 
-Everything stays inside the internal network; `--no-hosts` prevents your
-host `/etc/hosts` from leaking `127.0.0.1` mappings into the curl container.
+`--no-hosts` prevents your host `/etc/hosts` from leaking `127.0.0.1`
+mappings into the curl container so the container-network DNS wins.
 
-### 6. Benchmark mode
+### 7. Bridge archi into the same network
+
+To let archi's `data_manager` crawl `*.test` directly, attach its
+container(s) to `restricted_mirror`. Either run ad-hoc:
+
+```bash
+podman run -it --rm --no-hosts \
+    --network restricted_mirror \
+    -v "$PWD:/work" -w /work \
+    <archi-image> python -m data_manager.run --base http://twiki.cern.test
+```
+
+…or, in archi's own compose file, declare the network as external:
+
+```yaml
+services:
+  data_manager:
+    networks:
+      - restricted_mirror    # for *.test DNS, no egress
+      - default              # only if the service also needs internet
+
+networks:
+  restricted_mirror:
+    external: true
+```
+
+### 8. Tear down
+
+```bash
+podman compose -f "$GENERATED_OUTPUT_DIR/compose.yaml" down
+rccs net down              # only after all consumers have detached
+```
+
+### 9. Benchmark mode
 
 For re-runs against cached content:
 

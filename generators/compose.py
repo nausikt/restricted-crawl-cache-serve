@@ -23,10 +23,15 @@ def generate_compose(
     mirror_root: str | Path = "./mirror",
     nginx_sites_dir: str | Path = "./nginx/sites",
     generated_output_dir: str | Path = ".",
-    mirror_port: int = 8080,
     network_name: str = "restricted_mirror",
 ) -> Path:
     """Render compose.yaml from domain mapping.
+
+    The mirror is served only on the private (external) container
+    network ``network_name``.  No host ports are published — consumers
+    must attach to the same network.  Create it once with
+    ``rccs net up`` (or ``podman network create --internal <name>``)
+    before running ``compose up``.
 
     Args:
         domain_map:            {original_domain: test_domain}
@@ -38,10 +43,9 @@ def generate_compose(
                                ``/etc/nginx/conf.d`` (absolute).
         generated_output_dir:  rendered in a header comment so the file
                                documents its origin / ``$GENERATED_OUTPUT_DIR``.
-        mirror_port:           host port to expose (default 8080).
-        network_name:          docker compose network name
-                               (default "restricted_mirror"). The network is
-                               always rendered with ``internal: true``.
+        network_name:          compose network name, rendered as
+                               ``external: true`` (default
+                               ``"restricted_mirror"``).
 
     Returns:
         Path to the generated file.
@@ -59,7 +63,6 @@ def generate_compose(
 
     rendered = template.render(
         aliases=aliases,
-        mirror_port=mirror_port,
         network_name=network_name,
         mirror_root=str(mirror_root_abs),
         nginx_sites_dir=str(nginx_sites_abs),
