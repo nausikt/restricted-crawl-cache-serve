@@ -1,3 +1,6 @@
+# Ignore generated compose.yaml
+compose.yaml
+
 # Crawler artifacts
 crawler/.scrapy/
 crawler/**/*.pyc
