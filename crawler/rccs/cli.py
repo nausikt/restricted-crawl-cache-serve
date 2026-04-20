@@ -2,10 +2,11 @@
 RCCS CLI — orchestrates the crawl-cache-serve pipeline.
 
 Usage:
-    rccs parse    --config <archi-config.yaml>   # validate + show crawl plan
-    rccs crawl    --config <archi-config.yaml>   # run Scrapy with caching middleware
-    rccs generate --config <archi-config.yaml>   # emit compose.yaml + nginx configs
-    rccs run      --config <archi-config.yaml>   # all three steps in sequence
+    rccs -c <archi-config.yaml> parse            # validate + show crawl plan
+    rccs parse -c <archi-config.yaml>            # same (config may precede or follow the subcommand)
+    rccs crawl    -c <archi-config.yaml>         # run Scrapy with caching middleware
+    rccs generate -c <archi-config.yaml>         # emit compose.yaml + nginx configs
+    rccs run      -c <archi-config.yaml>         # all three steps in sequence
 
 Standalone scrapy usage (with archi settings from submodule):
     cd crawler && scrapy crawl twiki
@@ -171,75 +172,92 @@ def _route_urls(
 # Argument parser
 # ---------------------------------------------------------------------------
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="rccs",
-        description="Restricted Crawl, Cache, and Serve",
-    )
-    parser.add_argument(
+def build_parsers() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
+    """Return (full_parser, global_parser).
+
+    Global options are parsed from anywhere in argv via ``parse_known_args`` so
+    ``rccs -c cfg.yaml parse`` and ``rccs parse -c cfg.yaml`` both work.
+    """
+    global_parser = argparse.ArgumentParser(add_help=False)
+    global_parser.add_argument(
         "--config", "-c",
-        required=True,
+        required=False,
         help="Path to Archi deployment config YAML",
     )
-    parser.add_argument(
+    global_parser.add_argument(
         "--mirror-root",
         default="./mirror",
         help="Root directory for cached mirror content (default: ./mirror)",
     )
-    parser.add_argument(
+    global_parser.add_argument(
         "--archi-root",
         default=None,
         help="Root directory of archi submodule (for resolving list file paths)",
     )
-    parser.add_argument(
+    global_parser.add_argument(
         "--benchmark",
         action="store_true",
         help="Benchmark mode: reduce delays to minimum for fast re-crawling",
     )
-    parser.add_argument(
+    global_parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Verbose logging output",
     )
 
-    sub = parser.add_subparsers(dest="command")
+    full_parser = argparse.ArgumentParser(
+        prog="rccs",
+        description="Restricted Crawl, Cache, and Serve",
+        parents=[global_parser],
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    sub = full_parser.add_subparsers(dest="command", required=True)
     sub.add_parser("parse", help="Validate config and show crawl plan")
     sub.add_parser("crawl", help="Run Scrapy crawl with caching middleware")
     sub.add_parser("generate", help="Generate compose.yaml + nginx configs")
     sub.add_parser("run", help="Parse + crawl + generate (full pipeline)")
 
-    return parser
+    return full_parser, global_parser
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    full_parser, global_parser = build_parsers()
+
+    if not argv:
+        full_parser.print_help()
+        sys.exit(1)
+
+    gargs, rest = global_parser.parse_known_args(argv)
+    if not rest:
+        full_parser.print_help()
+        sys.exit(1)
+
+    cmd_args = full_parser.parse_args(rest)
+    if not gargs.config:
+        full_parser.error("the following arguments are required: -c/--config")
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if gargs.verbose else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-
     cfg = parse_archi_config(
-        config_path=args.config,
-        mirror_root=args.mirror_root,
-        archi_root=args.archi_root,
-        benchmark=args.benchmark,
+        config_path=gargs.config,
+        mirror_root=gargs.mirror_root,
+        archi_root=gargs.archi_root,
+        benchmark=gargs.benchmark,
     )
 
-    if args.command == "parse":
+    if cmd_args.command == "parse":
         cmd_parse(cfg)
-    elif args.command == "crawl":
+    elif cmd_args.command == "crawl":
         cmd_parse(cfg)
         cmd_crawl(cfg)
-    elif args.command == "generate":
+    elif cmd_args.command == "generate":
         cmd_parse(cfg)
         cmd_generate(cfg)
-    elif args.command == "run":
+    elif cmd_args.command == "run":
         cmd_parse(cfg)
         cmd_crawl(cfg)
         cmd_generate(cfg)
