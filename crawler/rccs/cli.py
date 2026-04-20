@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -39,6 +40,7 @@ def cmd_parse(cfg: RCCSConfig) -> None:
     print(f"Domain mappings:  {len(cfg.domain_map)}")
     print(f"Benchmark mode:   {cfg.benchmark}")
     print(f"Mirror root:      {cfg.mirror_root}")
+    print(f"Generated outdir: {cfg.generated_output_dir}")
     print()
 
     if cfg.domain_map:
@@ -120,23 +122,29 @@ def cmd_crawl(cfg: RCCSConfig) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_generate(cfg: RCCSConfig) -> None:
-    """Generate compose.yaml and nginx site configs from the domain mapping."""
-    project_root = Path(cfg.mirror_root).resolve().parent
+    """Generate compose.yaml and nginx site configs from the domain mapping.
+
+    Output location is controlled by ``cfg.generated_output_dir`` (CLI flag
+    ``--generated-output-dir`` / env ``GENERATED_OUTPUT_DIR``).  Default is
+    the current working directory.
+    """
+    out_root = Path(cfg.generated_output_dir).expanduser().resolve()
+    out_root.mkdir(parents=True, exist_ok=True)
 
     compose_path = generate_compose(
         domain_map=cfg.domain_map,
-        output_path=project_root / "compose.yaml",
+        output_path=out_root / "compose.yaml",
     )
     print(f"Generated: {compose_path}")
 
     nginx_configs = generate_nginx_configs(
         domain_map=cfg.domain_map,
-        output_dir=project_root / "nginx" / "sites",
+        output_dir=out_root / "nginx" / "sites",
     )
     for p in nginx_configs:
         print(f"Generated: {p}")
 
-    print(f"\nTo serve: docker compose -f {compose_path} up -d")
+    print(f"\nTo serve: (cd {out_root} && docker compose up -d)")
 
 
 # ---------------------------------------------------------------------------
@@ -186,13 +194,27 @@ def build_parsers() -> tuple[argparse.ArgumentParser, argparse.ArgumentParser]:
     )
     global_parser.add_argument(
         "--mirror-root",
-        default="./mirror",
-        help="Root directory for cached mirror content (default: ./mirror)",
+        default=os.environ.get("MIRROR_ROOT", "./mirror"),
+        help=(
+            "Root directory for cached mirror content "
+            "(env: MIRROR_ROOT, default: ./mirror)"
+        ),
+    )
+    global_parser.add_argument(
+        "--generated-output-dir",
+        default=os.environ.get("GENERATED_OUTPUT_DIR", "."),
+        help=(
+            "Directory where compose.yaml and nginx/sites/ are written "
+            "(env: GENERATED_OUTPUT_DIR, default: .)"
+        ),
     )
     global_parser.add_argument(
         "--archi-root",
-        default=None,
-        help="Root directory of archi submodule (for resolving list file paths)",
+        default=os.environ.get("ARCHI_ROOT"),
+        help=(
+            "Root directory of archi submodule (for resolving list file paths; "
+            "env: ARCHI_ROOT)"
+        ),
     )
     global_parser.add_argument(
         "--benchmark",
@@ -247,6 +269,7 @@ def main(argv: list[str] | None = None) -> None:
         mirror_root=gargs.mirror_root,
         archi_root=gargs.archi_root,
         benchmark=gargs.benchmark,
+        generated_output_dir=gargs.generated_output_dir,
     )
 
     if cmd_args.command == "parse":

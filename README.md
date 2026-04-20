@@ -1,54 +1,203 @@
 # Restricted Crawl, Cache, and Serve (RCCS)
 
-Crawl auth-gated and public websites, cache raw HTML/PDF responses with URL rewriting, and serve them locally via nginx for offline RAG benchmarking.
+Crawl auth-gated and public websites, cache raw responses (HTML, JSON, RSS,
+PDFs, Office docs, images, ...) with URL rewriting, and serve them locally
+via nginx for offline RAG benchmarking.
 
-*Especially for sensitive services: CERN TWiki (Public/Private), CERN SSO Discourse, paywalled publications, etc.*
+Designed for sensitive/auth-gated sources such as CERN TWiki (Public/Private),
+CERN SSO Discourse (`cms-talk.web.cern.ch`), and paywalled publications.
+
+---
 
 ## How it works
 
-1. **Crawl** — Scrapy spiders (with SSO auth via archi submodule) fetch pages
-2. **Cache** — `CacheRawDownloaderMiddleware` saves raw HTML/PDF to `mirror/`, rewriting domains (`twiki.cern.ch` → `twiki.cern.test`, `https` → `http`)
-3. **Serve** — Auto-generated `compose.yaml` + nginx configs serve cached content at `.test` domains
+1. **Crawl** — Scrapy spiders from the [archi](./archi) submodule fetch pages.
+   Auth (e.g. CERN SSO) is handled by archi's `AuthDownloaderMiddleware`.
+2. **Cache** — `CacheRawDownloaderMiddleware` saves raw responses to
+   `<mirror_root>/<site>/<path>`:
+   - HTML and XHTML are URL-rewritten (`twiki.cern.ch` → `twiki.cern.test`,
+     `https` → `http`) so internal links resolve locally.
+   - JSON / RSS / Atom / XML / Markdown / plain text are saved verbatim
+     (preserves API payload semantics, e.g. Discourse JSON).
+   - PDFs, MS Office (`.doc/.docx/.ppt/.pptx/.xls/.xlsx`), OpenDocument
+     (`.odt/.odp/.ods`), RTF, EPUB, and all common image formats are saved
+     as raw bytes.
+   - Servers that return `application/octet-stream` are still handled via
+     URL-extension fallback.
+   - Query strings become filename suffixes — e.g. `87.json?page=3` is
+     saved as `87.json__q__page-3`, so different query values map to
+     different cached files.
+3. **Serve** — `rccs generate` emits a `compose.yaml` + per-site nginx
+   configs. Nginx is on an **internal** Docker/Podman network named
+   `restricted_mirror` and answers on `.test` aliases.
 
-## Quick Start
+---
 
-### Using an Archi deployment config
+## Install
 
-```bash
-# Parse config and show crawl plan
-python -m crawler.rccs.cli --config path/to/archi-config.yaml parse
-
-# Crawl and cache all web sources
-python -m crawler.rccs.cli --config path/to/archi-config.yaml crawl
-
-# Generate compose.yaml + nginx configs
-python -m crawler.rccs.cli --config path/to/archi-config.yaml generate
-
-# Full pipeline (parse + crawl + generate)
-python -m crawler.rccs.cli --config path/to/archi-config.yaml run
-
-# Serve the cached mirror
-docker compose up -d
-```
-
-### Benchmark mode
-
-For fast re-crawling against already-cached content or local mirrors:
+Python ≥ 3.11, a container engine (Docker or Podman). Clone with submodules:
 
 ```bash
-python -m crawler.rccs.cli --config config.yaml --benchmark crawl
+git clone --recurse-submodules <this-repo>
+cd restricted-crawl-cache-serve
+
+# Venv (example location — feel free to put it anywhere)
+python3 -m venv ~/venvs/rccs
+source ~/venvs/rccs/bin/activate
+
+pip install -U pip
+pip install -e ".[archi,dev]"
+playwright install chromium      # archi's SSO provider uses headless Chromium
 ```
 
-This reduces all delays to at most 1 second.
+The package exposes a `rccs` console script after `pip install -e .`, so
+the examples below use `rccs ...` directly.
 
-### Standalone Scrapy (with archi spiders)
+---
 
-Spiders, settings, and auth come from the archi submodule:
+## CLI
+
+All subcommands share the same global options. Config path can be passed
+**before or after** the subcommand:
+
+```bash
+rccs -c examples/basic-crab/config.yaml parse       # both forms
+rccs parse -c examples/basic-crab/config.yaml       # are equivalent
+```
+
+| Subcommand | Action                                                |
+|------------|-------------------------------------------------------|
+| `parse`    | Validate Archi config + print the crawl plan          |
+| `crawl`    | Run Scrapy with caching middleware                    |
+| `generate` | Emit `compose.yaml` + `nginx/sites/*.conf`            |
+| `run`      | `parse` → `crawl` → `generate` in one shot            |
+
+Global flags (each has an environment-variable fallback):
+
+| Flag                     | Env var                 | Default      | Meaning                                                                 |
+|--------------------------|-------------------------|--------------|-------------------------------------------------------------------------|
+| `-c`, `--config`         | —                       | *required*   | Path to an Archi deployment YAML                                        |
+| `--mirror-root`          | `MIRROR_ROOT`           | `./mirror`   | Where cached content is written                                         |
+| `--generated-output-dir` | `GENERATED_OUTPUT_DIR`  | `.`          | Where `compose.yaml` and `nginx/sites/` are written                     |
+| `--archi-root`           | `ARCHI_ROOT`            | *unset*      | Root of the archi submodule (for `input_lists` relative paths)          |
+| `--benchmark`            | —                       | off          | Minimize delays for fast re-crawl of already-cached URLs                |
+| `-v`, `--verbose`        | —                       | off          | Debug logging                                                           |
+
+Auth secrets (read by archi's `CERNSSOProvider`):
+
+| Env var        | Notes                                              |
+|----------------|----------------------------------------------------|
+| `SSO_USERNAME` | CERN SSO username                                  |
+| `SSO_PASSWORD` | CERN SSO password                                  |
+
+---
+
+## Example — shared mirror at `/shared/rccs/`
+
+This is the workflow I use day to day. Cache content under
+`/shared/rccs/mirror` and emit the generated compose/nginx files under
+`/shared/rccs/`, which is where they get mounted from:
+
+- `/shared/rccs/compose.yaml`
+- `/shared/rccs/nginx/sites/*.conf`
+
+All `rccs` commands run from the project checkout; only the **outputs**
+live under `/shared/rccs/`.
+
+### 1. Export secrets + shared paths
+
+```bash
+export SSO_USERNAME=aqua
+export SSO_PASSWORD='••••••••'
+export MIRROR_ROOT=/shared/rccs/mirror
+export GENERATED_OUTPUT_DIR=/shared/rccs
+mkdir -p "$MIRROR_ROOT" "$GENERATED_OUTPUT_DIR"
+```
+
+> `SSO_USERNAME` / `SSO_PASSWORD` are read by archi's `CERNSSOProvider`
+> (see `archi/src/data_manager/collectors/scrapers/auth/cern_sso.py`).
+> `MIRROR_ROOT` and `GENERATED_OUTPUT_DIR` are picked up automatically by
+> the `rccs` CLI when the matching flags are not supplied.
+> They are **not** committed anywhere; keep them in your shell/secret
+> manager.
+
+### 2. Inspect the plan
+
+```bash
+rccs parse -c examples/basic-crab/config.yaml
+```
+
+The env vars are applied automatically; no extra flags needed. The output
+header will show the resolved `Mirror root` and `Generated outdir`.
+
+### 3. Crawl + generate + serve
+
+```bash
+# Crawl-only (can run alongside generate in another terminal).
+rccs crawl -c examples/basic-crab/config.yaml
+
+# Emit /shared/rccs/compose.yaml + /shared/rccs/nginx/sites/*.conf
+rccs generate -c examples/basic-crab/config.yaml
+
+# Full pipeline (parse + crawl + generate) in one command.
+rccs run -c examples/basic-crab/config.yaml
+```
+
+If you'd rather be explicit (or skip the env vars), pass flags instead:
+
+```bash
+rccs run -c examples/basic-crab/config.yaml \
+    --mirror-root /shared/rccs/mirror \
+    --generated-output-dir /shared/rccs
+```
+
+### 4. Start nginx
+
+```bash
+cd "$GENERATED_OUTPUT_DIR"          # /shared/rccs
+podman compose up -d                 # or: docker compose up -d
+podman compose ps
+```
+
+### 5. Test from another container on the mirror network
+
+The network is **internal** (no egress), named literally `restricted_mirror`
+— no project prefix — thanks to the pinned `name:` in the compose file.
+
+```bash
+# one-liner curl helper that joins the same network
+rcurl() {
+  podman run -it --rm --no-hosts \
+      --network restricted_mirror curlimages/curl curl -v "$@"
+}
+
+rcurl http://twiki.cern.test/twiki/bin/view/CMSPublic/SWGuide/
+rcurl http://cms-talk.web.cern.test/c/offcomp/comptools/87.json?page=3
+```
+
+Everything stays inside the internal network; `--no-hosts` prevents your
+host `/etc/hosts` from leaking `127.0.0.1` mappings into the curl container.
+
+### 6. Benchmark mode
+
+For re-runs against cached content:
+
+```bash
+rccs crawl -c examples/basic-crab/config.yaml --benchmark
+```
+
+This caps per-request delays at 1 s.
+
+---
+
+## Standalone Scrapy (debug a single spider)
 
 ```bash
 cd crawler
-scrapy crawl twiki
+SSO_USERNAME=$SSO_USERNAME SSO_PASSWORD=$SSO_PASSWORD scrapy crawl twiki
 ```
+
+---
 
 ## Architecture
 
@@ -65,54 +214,120 @@ Archi config.yaml
                         │
                         ▼
                URLRewriter + Save
-               mirror/<site>/<path>/
+               <MIRROR_ROOT>/<site>/<path>[__q__<query>]
                         │
                         ▼
               ComposeGenerator + NginxGenerator
-              compose.yaml + nginx/sites/*.conf
+              <GENERATED_OUTPUT_DIR>/compose.yaml
+              <GENERATED_OUTPUT_DIR>/nginx/sites/*.conf
                         │
                         ▼
-               docker compose up -d
-            nginx serves *.cern.test
+           (docker|podman) compose up -d
+            nginx serves *.cern.test on an
+            internal network "restricted_mirror"
 ```
 
-## Project Structure
+---
+
+## Project layout
 
 ```
 restricted-crawl-cache-serve/
-  archi/                        # git submodule → nausikt/archi
+  archi/                         # git submodule → nausikt/archi
   crawler/
-    scrapy.cfg                  # points to archi's settings.py
+    scrapy.cfg                   # points to archi's settings.py
     rccs/
-      config_adapter.py         # Parse Archi YAML → RCCS crawl config
-      url_rewriter.py           # Domain/scheme rewriting engine
-      domain_mapper.py          # Auto-detect domain → .test mapping
-      cli.py                    # CLI entry point
+      cli.py                     # `rccs` entry point
+      config_adapter.py          # Archi YAML → RCCSConfig
+      url_rewriter.py            # domain / scheme rewriting
+      domain_mapper.py           # auto-detect domain → .test mapping
     middlewares/
-      cache_raw.py              # CacheRawDownloaderMiddleware
+      cache_raw.py               # MIME-aware caching middleware
   generators/
-    compose.py                  # Auto-generate compose.yaml
-    nginx.py                    # Auto-generate nginx site configs
+    compose.py                   # compose.yaml generator
+    nginx.py                     # per-site nginx conf generator
   templates/
-    compose.yaml.j2             # Jinja2 template for compose
-    nginx-site.conf.j2          # Jinja2 template for nginx vhost
-  mirror/                       # Cached crawl output
-  nginx/sites/                  # Generated nginx configs
+    compose.yaml.j2
+    nginx-site.conf.j2
+    nginx-shared.conf.j2         # `map $args $rccs_qsuffix`
+  examples/
+    basic-crab/config.yaml       # sample Archi deployment config
   pyproject.toml
 ```
 
-Spiders, Scrapy settings, auth middlewares, and pipelines all come from the
-archi submodule (`src.data_manager.collectors.scrapers.*`). RCCS only adds
-`CacheRawDownloaderMiddleware` and the URL rewriting / generation layer.
+Spiders, Scrapy settings, auth middlewares, and pipelines all come from
+the archi submodule (`src.data_manager.collectors.scrapers.*`). RCCS only
+adds `CacheRawDownloaderMiddleware` and the URL rewriting / generation
+layer.
 
-## URL Rewriting
+Generated outputs (`mirror/`, `nginx/sites/`, `compose.yaml`) are
+`.gitignore`d.
 
-RCCS automatically detects domains from seed URLs and site configs, then rewrites:
-- `https://twiki.cern.ch/...` → `http://twiki.cern.test/...`
-- `https://cms-talk.web.cern.ch/...` → `http://cms-talk.web.cern.test/...`
+---
 
-The TLD is replaced with `.test` and `https` is downgraded to `http` for local serving.
+## URL rewriting
+
+From seed URLs and site configs, RCCS builds a `domain_map`:
+
+- `twiki.cern.ch` → `twiki.cern.test`
+- `cms-talk.web.cern.ch` → `cms-talk.web.cern.test`
+
+The TLD is replaced with `.test` and `https` is downgraded to `http` for
+local serving. Rewriting is applied only to HTML/XHTML bodies; JSON/RSS
+payloads are preserved verbatim.
+
+---
+
+## Query-string cache layout
+
+The middleware preserves query semantics offline by encoding the query
+string into the filename:
+
+| URL                                                       | On-disk path                                              |
+|-----------------------------------------------------------|-----------------------------------------------------------|
+| `…/87.json`                                               | `…/87.json`                                               |
+| `…/87.json?page=3`                                        | `…/87.json__q__page-3`                                    |
+| `…/87.json?page=3&order=asc`                              | `…/87.json__q__page-3__order-asc`                         |
+| `…/WebHome?rev=12`                                        | `…/WebHome/index.html__q__rev-12`                         |
+
+Nginx uses a shared `map $args $rccs_qsuffix { … }` block (emitted as
+`nginx/sites/_rccs-shared.conf`) plus `try_files $uri$rccs_qsuffix $uri`
+to serve these files as if they came from a dynamic backend. Extend that
+`map` file with regex entries for any other query shapes your sites use;
+unmapped queries fall back to the no-query file.
+
+---
+
+## Supported content types
+
+- **Rewritten HTML:** `text/html`, `application/xhtml+xml`
+- **Raw text (no rewrite):** `application/json`, `application/rss+xml`,
+  `application/atom+xml`, `application/xml`, `text/xml`, `text/plain`,
+  `text/csv`, `text/tab-separated-values`, `text/markdown`
+- **Documents:** PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, ODT/ODP/ODS, RTF, EPUB
+- **Images:** PNG, JPEG, GIF, WebP, SVG, BMP, ICO, TIFF, AVIF, HEIC/HEIF, APNG
+- **Generic downloads:** `application/octet-stream` (and similar) are
+  routed based on URL extension.
+
+Unknown types are logged at DEBUG and skipped — the crawl continues.
+
+---
+
+## Reminders (my own)
+
+- `SSO_USERNAME` / `SSO_PASSWORD` live only in the shell / a secret
+  manager. Never commit them.
+- Mirror lives at `$MIRROR_ROOT` (e.g. `/shared/rccs/mirror`). Generated
+  files land in `$GENERATED_OUTPUT_DIR` (e.g. `/shared/rccs`).
+- Compose network is **internal** and pinned to `restricted_mirror` (no
+  project prefix), so `--network restricted_mirror` always works.
+- After deleting query shapes or domains, regenerate:
+  `rccs generate -c <cfg>`.
+- `rccs` and `podman compose` must run under the **same** engine. If you
+  use Docker for compose, use Docker for curl helpers too.
+
+---
 
 ## Contributors
 
-- Krittin Phornsiricharoenphant (krittin.phornsiricharoenphant@cern.ch)
+- Krittin Phornsiricharoenphant (<krittin.phornsiricharoenphant@cern.ch>)

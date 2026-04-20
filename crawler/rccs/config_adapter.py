@@ -51,6 +51,7 @@ class RCCSConfig:
     url_rewriter: URLRewriter
     fallback_spider: str = "link"
     mirror_root: str = "./mirror"
+    generated_output_dir: str = "."
 
     # Global defaults (can be overridden per-site)
     global_max_depth: int = 2
@@ -103,6 +104,7 @@ def parse_archi_config(
     mirror_root: str = "./mirror",
     archi_root: str | Path | None = None,
     benchmark: bool = False,
+    generated_output_dir: str = ".",
 ) -> RCCSConfig:
     """Parse an Archi deployment YAML into an RCCSConfig."""
     config_path = Path(config_path)
@@ -169,6 +171,7 @@ def parse_archi_config(
         url_rewriter=url_rewriter,
         fallback_spider=fallback_spider,
         mirror_root=mirror_root,
+        generated_output_dir=generated_output_dir,
         global_max_depth=global_max_depth,
         global_max_pages=global_max_pages,
         global_delay=global_delay,
